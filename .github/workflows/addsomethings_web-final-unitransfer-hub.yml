@@ -18,20 +18,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ⭐ 1. 升級成 v4 最新版本，徹底解決 Node 20 棄用警告！
+      # ⭐ 1. 升級為 v4 最新旗艦版，徹底消滅 Node 20 棄用警告！
       - name: Set up Node.js version
         uses: actions/setup-node@v4
         with:
           node-version: '22.x'
 
-      # ⭐ 2. 智慧雙層依賴安裝：根目錄與 server/ 後端資料夾通通安裝乾淨！
+      # ⭐ 2. 智慧雙層套件安裝：同時灌飽根目錄與 server/ 後端廚房！
       - name: npm install, build, and test
         run: |
           npm install
           npm run build --if-present
           npm run test --if-present
           
-          # 檢查若有 server 資料夾，走進去把 Express 後端套件也妥妥裝好
+          # 檢測若存在 server 資料夾，自動走進去安裝 Express, sql.js 等後端核心套件
           if [ -d "server" ]; then
             echo "Installing backend dependencies in server/..."
             cd server
@@ -58,6 +58,7 @@ jobs:
         with:
           name: node-app
       
+      # ⭐ 3. 你的 Azure 皇家安全憑證金鑰已完整保留
       - name: Login to Azure
         uses: azure/login@v2
         with:
@@ -72,4 +73,3 @@ jobs:
           app-name: 'Web-Final-UniTransfer-Hub'
           slot-name: 'Production'
           package: .
-          
