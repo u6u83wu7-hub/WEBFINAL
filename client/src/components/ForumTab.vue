@@ -1,6 +1,6 @@
 ﻿<script setup>
 import { ref, onMounted } from 'vue'
-const BASE_URL = 'http://localhost:3000'
+const BASE_URL = ''
 
 const posts         = ref([])
 const loading       = ref(false)
