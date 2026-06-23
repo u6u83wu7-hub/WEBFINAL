@@ -1,12 +1,18 @@
 ﻿const express = require('express');
 const cors    = require('cors');
+const path    = require('path'); // ⭐ 補上 path 套件（用來抓前端網頁）
 const { initDB, getDB, saveDB } = require('./database');
 
 const app  = express();
-const PORT = 3000;
+// ⭐ 統一名稱：全部用小寫的 port
+const port = process.env.PORT || 3000;
 
-app.use(cors({ origin: 'http://localhost:5173' }));
+// ⭐ 放寬 CORS，讓雲端網域也能自由呼叫 API
+app.use(cors());
 app.use(express.json());
+
+// ⭐ 讓 Express 公開 public 資料夾（請確保你打包後的 Vue 網頁檔案放在 server/public 裡）
+app.use(express.static(path.join(__dirname, 'public')));
 
 // ─── GET /api/checklist ────────────────────────────────────────────────────
 app.get('/api/checklist', (req, res) => {
@@ -214,6 +220,13 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// ⭐ 萬用路由：只要網址列輸入的不是 /api，通通送客去看 Vue 的首頁！
+app.get('*', (req, res) => {
+  if (!req.path.startsWith('/api')) {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  }
+});
+
 // ─── 啟動：等 initDB 完成後才建立所有 table 與假資料 ──────────────────────
 initDB().then(() => {
   const db = getDB();
@@ -294,8 +307,9 @@ initDB().then(() => {
   saveDB();
   console.log('✅ 所有資料表初始化完成');
 
-  app.listen(PORT, () => {
-    console.log(`🚀 UniTransfer Hub API 已啟動：http://localhost:${PORT}`);
+  // ⭐ 奇蹟發生點：用小寫 port，綁定 '0.0.0.0'
+  app.listen(port, '0.0.0.0', () => {
+    console.log(`🚀 UniTransfer Hub API 已啟動：http://localhost:${port}`);
   });
 }).catch(err => {
   console.error('❌ 資料庫初始化失敗：', err);
