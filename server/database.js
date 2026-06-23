@@ -3,130 +3,119 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-// ��������� ES Module 撠���函�� __dirname ���撱箏之瘜� ���������
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
 const DB_PATH = path.join(__dirname, 'transfer.db');
 
 let db;
 
 async function initDB() {
   const SQL = await initSqlJs();
-
   if (fs.existsSync(DB_PATH)) {
-    const fileBuffer = fs.readFileSync(DB_PATH);
-    db = new SQL.Database(fileBuffer);
-    console.log('��� 霈������Ｘ��鞈����摨恬��', DB_PATH);
+    db = new SQL.Database(fs.readFileSync(DB_PATH));
+    console.log('✅ 讀取已存在的 SQLite 資料庫：', DB_PATH);
   } else {
     db = new SQL.Database();
-    console.log('��� 撱箇����啗�����摨�');
+    console.log('✅ 建立全新的 SQLite 資料庫');
   }
-
   db.run('PRAGMA journal_mode = WAL;');
 
+  // 1. 任務總表
   db.run(`
     CREATE TABLE IF NOT EXISTS checklists (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,
       target_grade INTEGER NOT NULL,
       category     TEXT    NOT NULL,
       text         TEXT    NOT NULL,
-      is_required  INTEGER NOT NULL DEFAULT 1
+      is_required  INTEGER NOT NULL DEFAULT 1,
+      deadline     TEXT    NOT NULL DEFAULT '2025-09-30',
+      building     TEXT    NOT NULL DEFAULT '行政大樓',
+      office_phone TEXT    NOT NULL DEFAULT '分機2111'
     )
   `);
 
+  // ⭐ 2. 全新：使用者帳號表 (分拆 student 與 admin)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS users (
+      id       INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT    UNIQUE NOT NULL,
+      password TEXT    NOT NULL,
+      name     TEXT    NOT NULL,
+      role     TEXT    NOT NULL DEFAULT 'student',
+      grade    INTEGER DEFAULT 2
+    )
+  `);
+
+  // ⭐ 3. 全新：使用者進度追蹤表 (複合主鍵綁死 UserID 與 TaskID)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS user_progress (
+      user_id      INTEGER NOT NULL,
+      task_id      INTEGER NOT NULL,
+      is_completed INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, task_id)
+    )
+  `);
+
+  // 預設學分表
   db.run(`
     CREATE TABLE IF NOT EXISTS credit_records (
-      id               INTEGER PRIMARY KEY AUTOINCREMENT,
-      original_school  TEXT    NOT NULL,
-      original_dept    TEXT    NOT NULL,
-      original_course  TEXT    NOT NULL,
-      credits          INTEGER NOT NULL,
-      target_course    TEXT    NOT NULL,
-      status           TEXT    NOT NULL,
-      advice           TEXT,
-      created_at       TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+      id INTEGER PRIMARY KEY AUTOINCREMENT, original_school TEXT NOT NULL, original_dept TEXT NOT NULL,
+      original_course TEXT NOT NULL, credits INTEGER NOT NULL, target_course TEXT NOT NULL,
+      status TEXT NOT NULL, advice TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
     )
   `);
 
-  const checklistCount = db.exec('SELECT COUNT(*) AS cnt FROM checklists');
-  const cnt1 = checklistCount[0]?.values[0][0] ?? 0;
-
-  if (cnt1 === 0) {
-    const checklistData = [
-      [2, '��萄蝴���霅�隞�', '��������∠�唾�������典飛霅���������������萄蝴蝺拙噩��唾����詻��嚗���澆�亙飛敺� 7 ��亙�抒像鈭文飛��������萄蝴璆剖��蝯�嚗���暹��撠�鋡恍�����', 1],
-      [2, '撣唾����唾��',   '摰���� NTU G-Suite 摮貉��撣唾�������剁��@ntu.edu.tw嚗�嚗������曄�唾��敺� 48 撠������批�����嚗�撣唾��撠�雿���粹�貉玨�����∪��蝟餌絞��餃�交��霅�', 1],
-      [2, '摮詨����萄��',   '���憒亙����～��甇瑕僑���蝮曉�殷��隤�霅���穿��������������蝘�隤脩��憭抒雇���嚗���單����������唾��摮詨����萄��撖拇�賂����芣迫��亦�粹��摮詨��蝚砌����望�����鈭� 17:00', 1],
-      [2, '��亙熒瑼Ｘ��',   '��唾�箏之���閮剝�恍�� B1 ��交炎銝剖��摰������啁����亙熒瑼Ｘ�伐��鞎餌�函�� $500嚗����蝬脰楝���蝝�嚗�嚗�蝯����敶梢�踹挪�����賜惜鞈����', 1],
-      [2, '雿�摰輻�餉��',   '摰����摰輯����賜惜��餉�����憛怠神��∪��蝘�撅���芯蜓��喳�梧����駁����啣��敶梢�蹂����嗅�交�嗚��撘勗�Ｗ�拙飛�����唾��鞈���潘��', 1],
-      [2, '��貉玨閬����',   '���閬質玨蝔�蝬脩Ⅱ隤�蝟餅��敹�靽株玨��啣��嚗�憭找��頧���仿��鋆�靽株�喳�� 8 摮詨�����霅�嚗�撱箄降�����亦頂摮豢�� LINE 蝢文��敺���貉玨撖����', 0],
-      [2, '蝷曄黎������',   '������ PTT NTU ��踹��蝟餅��頧�摮貊�� Facebook 蝷曉��嚗���脣��蝚砌�����隤脩��閰���寡�����������憟質��閮�', 0],
-      [3, '��萄蝴���霅�隞�', '��������∠�唾�������典飛霅���������������萄蝴蝺拙噩��唾����詻��嚗���澆�亙飛敺� 7 ��亙�抒像鈭文飛��������萄蝴璆剖��蝯�嚗���暹��撠�鋡恍�����', 1],
-      [3, '撣唾����唾��',   '摰���� NTU G-Suite 摮貉��撣唾�������剁��@ntu.edu.tw嚗�嚗������曄�唾��敺� 48 撠������批�����', 1],
-      [3, '摮詨����萄��',   '���憒亙����～��甇瑕僑���蝮曉�殷��隤�霅���穿��������������蝘�隤脩��憭抒雇���嚗���唾��摮詨����萄��嚗�憭找��頧���交�萄��摮詨��銝������� 40 摮詨��', 1],
-      [3, '��Ｘ平摮詨��蝣箄��', '���蝟餉齒��拍��蝣箄����拚����Ｘ平���靽桀飛������靽格平撟湧��嚗�憭找��頧���仿��撣� 2 撟渡�Ｘ平嚗�嚗������拇��隤脤�踹��憭批��憯����', 1],
-      [3, '��亙熒瑼Ｘ��',   '��唾�箏之���閮剝�恍�� B1 ��交炎銝剖��摰������啁����亙熒瑼Ｘ�伐��鞎餌�函�� $500嚗����蝬脰楝���蝝�嚗�', 1],
-      [3, '��詨�瑁����拙飛���', '蝣箄����詨�瑞�����蝟餅�����摮賊�����撘勗�Ｗ�拙飛�����唾��鞈���潘��憭找��頧���亦洵銝�摮豢�����蝮暸��璅�嚗���� 5%嚗���喳�舐�唾��', 0],
-      [3, '撖衣��/鈭斗��閬����', '��典��鈭斗��閮���怨��瘙���冽�⊥遛銝�摮豢�������賜�唾��嚗������抵��������鈭�������蝣箄�� deadline嚗���踹����臬仃璈����', 0],
-      [3, '蝷曄黎������',   '������ PTT NTU ��踹��蝟餅��頧�摮貊�� Facebook 蝷曉��嚗���孵�亦�����憭找��撣貉◤��∠�����蝟餃��靽柴��靽株玨���摨����憿�', 0],
+  // 寫入預設帳號假資料
+  const userCnt = db.exec('SELECT COUNT(*) FROM users')[0]?.values[0][0] ?? 0;
+  if (userCnt === 0) {
+    const defaultUsers = [
+      ['admin', 'admin123', '註冊課務組 ‧ 王管理員', 'admin', 0],
+      ['d1140001', 'fcu1234', '大二轉學生 ‧ 林小明', 'student', 2],
+      ['d1140002', 'fcu1234', '大三轉學生 ‧ 張小華', 'student', 3],
     ];
-
-    checklistData.forEach(([grade, cat, text, req]) => {
-      db.run(
-        'INSERT INTO checklists (target_grade, category, text, is_required) VALUES (?, ?, ?, ?)',
-        [grade, cat, text, req]
-      );
+    defaultUsers.forEach(([u, p, n, r, g]) => {
+      db.run('INSERT INTO users (username, password, name, role, grade) VALUES (?, ?, ?, ?, ?)', [u, p, n, r, g]);
     });
-    console.log('��� checklists ���鞈����撖怠�亙�����');
+    console.log('✅ 系統預設登入帳號初始化完成');
   }
 
-  const creditCount = db.exec('SELECT COUNT(*) AS cnt FROM credit_records');
-  const cnt2 = creditCount[0]?.values[0][0] ?? 0;
+  // 寫入逢甲官方轉學任務假資料
+  const chkCnt = db.exec('SELECT COUNT(*) FROM checklists')[0]?.values[0][0] ?? 0;
+  if (chkCnt === 0) {
+    const checklistData = [
+      [2, '兵役與證件', '於育樂館現場辦理正取生報到，繳交國民身分證正本(驗後發還)、學歷證書正本及成績單。', 1, '2025-08-05', '育樂館', '分機2124'],
+      [2, '帳號申請', '至新生專區啟用網路帳號(NID)，並登入 MyFCU 上傳證件照以製作逢甲正式學生證。', 1, '2025-08-07', '資訊電機館', '分機2708'],
+      [2, '帳號申請', '登入 MyFCU ->「銀行帳號維護」，上傳學生本人金融機構存摺封面影本，供校內各項助學金與退費撥款使用。', 1, '2025-08-07', '行政大樓', '分機2361'],
+      [2, '兵役與證件', '轉學男生務必登入 MyFCU 線上填寫「役男兵役狀況調查表」，詳填鄰里住址並送出，始能辦理緩徵儘召。', 1, '2025-08-06', '行政二館', '分機2225'],
+      [2, '兵役與證件', '透過「行動逢甲APP」產生繳費單繳交上學期學雜費，可於超商、ATM轉帳或信用卡繳納。', 1, '2025-08-15', '行政大樓', '分機2056'],
+      [2, '書卷與助學金', '確認行政院減免學雜費(1.75萬)資格；若大一階段曾請領過同等補助，請主動繳交具結書辦理切結。', 1, '2025-08-05', '行政二館', '分機2220'],
+      [2, '學分抵免', '備妥成績單正本與各科課程大綱，進入註冊課務組「學分抵免專區」下載抵免單辦理，期限內務必完成。', 1, '2025-09-12', '資訊電機館', '分機2111'],
+      [2, '健康檢查', '至衛保組網頁填寫問卷，並預約時段於 9/4-9/6 準時至育樂館進行校內新生健康檢查。', 1, '2025-09-06', '育樂館', '分機2546'],
+      [2, '選課規劃', '8/21上午9:00起上網查詢必修課表；選修科目請於加退選期間自行加選，抵免通過科目請自行退選。', 1, '2025-08-29', '資訊電機館', '分機2127'],
+      [2, '兵役與證件', '開學日 9/8 起，請攜帶身分證件親自至資訊電機館一樓註冊課務組櫃檯，領取逢甲實體學生證。', 1, '2025-09-08', '資訊電機館', '分機2111'],
 
-  if (cnt2 === 0) {
-    const creditData = [
-      ['頛�隞�憭批飛', '鞈�閮�撌亦��摮貊頂', '鞈����蝯�瑽����瞍�蝞�瘜�', 3, '瞍�蝞�瘜�閮剛��', '������',
-       '���撣嗅����∟玨蝬勗����扯”��� A+ ���蝮曉�殷��蝟餉齒��拍����湔�亥��蝡�嚗���游��瘚�蝔�銝���� 15 ���������'],
-      ['瘛⊥��憭批飛', '��餅��撌亦��摮貊頂', '閮�蝞�璈�蝯�蝜����蝯�瑽�', 3, '閮�蝞�璈�蝯�瑽�', '������',
-       '隤脩雇撟曆��銝�璅∩��璅�嚗�������蝚�隤芣�胯��銴�鋆質票銝����嚗�銝���勗�扳�嗅�圈����������乓��'],
-      ['��勗�喳之摮�', '蝯梯��摮貊頂', '蝯梯��摮賂��銝�嚗�嚗�鈭�嚗�', 6, '璈�������蝯梯��', '���鋆�隤脩雇',
-       '���隤脩雇蝻箏��鞎�瘞�蝯梯����� MCMC 蝡�蝭�嚗����鋆�靽桐��������摰�蝺�銝�隤脩��銝衣像鈭斗�芸��嚗�蝝�銝���梯��隞嗚��'],
-      ['銝剖��憭批飛', '��餅��撌亦��摮貊頂', '��餉楝摮賂��銝�嚗�', 3, '��餉楝摮�', '���鋆�隤脩雇',
-       '摮詨����詨榆頝���舫����蛛��������靽柴����餉楝摮詨祕撽����1 摮詨��敺������詨����冽�豢�萄�����'],
-      ['������憭批飛', '鞈�閮�蝞∠��摮貊頂', '��拐辣撠����蝔�撘�閮剛��', 3, '蝔�撘�閮剛�����撖衣��', '������',
-       '���蝮� A 隞乩��撟曆��銝����隤脩雇蝝啁��嚗���湔�仿��嚗����撣訾��敹����'],
-      ['撖西��憭批飛', '鞈�閮�蝘�������蝞∠��摮貊頂', '鞈����摨怎恣���蝟餌絞', 3, '鞈����摨怎頂蝯�', '擏����',
-       '���隤脩��雿輻�� MS Access嚗���祆�∩蝙��� PostgreSQL嚗�������隤���箏榆��圈��憭抒�湔�仿��隞嗚��'],
-      ['�����箏之摮�', '撌交平撌亦�����蝞∠��摮貊頂', '雿�璆剔��蝛�', 3, '雿�璆剔��蝛�', '������',
-       '隤脩雇擃�摨阡�����嚗�撖拇�詨����∠Ⅱ隤�敺���拙予撠梢�����嚗�撱箄降���銝������怨�������瑕�����撖拇�乓��'],
-      ['��Ｙ�脣之摮�', '鞈�閮�撌亦��摮貊頂', '頠�擃�撌亦��', 3, '頠�擃�撌亦�����撖血��', '���鋆�隤脩雇',
-       '���隤脩雇蝻箏�� Agile/Scrum 撖血��蝡�蝭�嚗�鋆�銝���拍��隢������梯��敹�敺�敺���脫�孵�����'],
+      [3, '兵役與證件', '於育樂館現場辦理大三正取生報到，繳交身分證、學歷證明正本及成績單。', 1, '2025-08-05', '育樂館', '分機2124'],
+      [3, '帳號申請', '完成報到後啟用網路帳號(NID)，並登入 MyFCU 上傳大頭照以製作實體學生證。', 1, '2025-08-07', '資訊電機館', '分機2708'],
+      [3, '兵役與證件', '轉學男生務必登入 MyFCU 填寫兵役狀況調查表，詳填鄰里住址並送出。', 1, '2025-08-06', '行政二館', '分機2225'],
+      [3, '學分抵免', '大三轉學涉及高年級專業科目抵免，請備妥成績單與「各科完整每週課綱」，至註冊課務組嚴審。', 1, '2025-09-12', '資訊電機館', '分機2111'],
+      [3, '選課規劃', '⚠️ 極度重要：8/5以後報到之大三轉學生，必修課「不會」直接轉入，請務必於加退選期間自行加選所有必/選修課！', 1, '2025-09-19', '資訊電機館', '分機2127'],
+      [3, '健康檢查', '上網預約時段，於 9/4-9/6 準時至育樂館完成新生體檢。', 1, '2025-09-06', '育樂館', '分機2546'],
+      [3, '兵役與證件', '9/8 開學日起，持身分證件至資電館一樓註冊課務組領取實體學生證。', 1, '2025-09-08', '資訊電機館', '分機2111'],
     ];
-
-    creditData.forEach(row => {
-      db.run(
-        `INSERT INTO credit_records
-          (original_school, original_dept, original_course, credits, target_course, status, advice)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        row
-      );
+    checklistData.forEach(([g, c, t, r, d, b, p]) => {
+      db.run('INSERT INTO checklists (target_grade, category, text, is_required, deadline, building, office_phone) VALUES (?, ?, ?, ?, ?, ?, ?)', [g, c, t, r, d, b, p]);
     });
-    console.log('��� credit_records ���鞈����撖怠�亙�����');
+    console.log('✅ checklists 真實數據初始化完成');
+  }
+
+  const creditCount = db.exec('SELECT COUNT(*) FROM credit_records')[0]?.values[0][0] ?? 0;
+  if (creditCount === 0) {
+    db.run("INSERT INTO credit_records (original_school, original_dept, original_course, credits, target_course, status, advice) VALUES ('臺灣大學', '資訊工程學系', '資料結構與演算法', 3, '資料結構', '通過', '完整檢附每週課綱')");
   }
 
   saveDB();
-  console.log('��� 鞈����摨怠��憪����摰����');
 }
 
-function saveDB() {
-  const data = db.export();
-  const buffer = Buffer.from(data);
-  fs.writeFileSync(DB_PATH, buffer);
-}
-
-function getDB() {
-  return db;
-}
-
-// ��������� 靽格迤��臬�箸�孵�� ���������
+function saveDB() { fs.writeFileSync(DB_PATH, Buffer.from(db.export())); }
+function getDB() { return db; }
 export { initDB, getDB, saveDB };
