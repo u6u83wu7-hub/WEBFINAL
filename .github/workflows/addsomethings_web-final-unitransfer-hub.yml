@@ -16,17 +16,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # ⭐ 1. 順便把 Node 版本推上 22.x，徹底撕爛 GitHub 碎碎唸的黃字嘴！
       - name: Set up Node.js version
-        uses: actions/setup-node@v4 # 旗艦版 v4
+        uses: actions/setup-node@v4
         with:
-          node-version: '20.x'
+          node-version: '22.x'
 
-      - name: 1. 走進 client 廚房編譯前端 Vue 成品
+      - name: 1. 走進 client 廚房：焦土清場並編譯前端
         run: |
           echo "Building client..."
           cd client
+          # ★ 絕對殺手鐧：把從 Windows 偷渡上來的 node_modules 實體徹底燒毀！
+          rm -rf node_modules package-lock.json
           npm install
-          npm run build
+          # ★ 權限破道指令：改用 npx 強制召喚 vite，無視 Linux 底層的捷徑權限鎖！
+          npx vite build
           cd ..
 
       - name: 2. 將前端外送盒搬運進 server 的供桌上
@@ -35,14 +39,14 @@ jobs:
           mkdir -p server/public
           cp -R client/dist/* server/public/
 
-      - name: 3. 走進 server 廚房安裝 Express 後端套件
+      - name: 3. 走進 server 廚房：清場並安裝後端套件
         run: |
           echo "Installing server dependencies..."
           cd server
+          rm -rf node_modules package-lock.json # 後端比照辦理，斬草除根
           npm install
           cd ..
 
-      # ⭐ 4. 奇蹟發生點：我們只把融合完畢的 server 資料夾打包交給 Azure！
       - name: 4. 打包後端廚房作為最終雲端包裹
         uses: actions/upload-artifact@v4
         with:
