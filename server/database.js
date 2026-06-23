@@ -34,7 +34,7 @@ async function initDB() {
     )
   `);
 
-  // ⭐ 2. 全新：使用者帳號表 (分拆 student 與 admin)
+  // 2. 使用者帳號表
   db.run(`
     CREATE TABLE IF NOT EXISTS users (
       id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,7 +46,7 @@ async function initDB() {
     )
   `);
 
-  // ⭐ 3. 全新：使用者進度追蹤表 (複合主鍵綁死 UserID 與 TaskID)
+  // 3. 使用者進度追蹤表
   db.run(`
     CREATE TABLE IF NOT EXISTS user_progress (
       user_id      INTEGER NOT NULL,
@@ -56,7 +56,7 @@ async function initDB() {
     )
   `);
 
-  // 預設學分表
+  // 4. 預設學分表
   db.run(`
     CREATE TABLE IF NOT EXISTS credit_records (
       id INTEGER PRIMARY KEY AUTOINCREMENT, original_school TEXT NOT NULL, original_dept TEXT NOT NULL,
@@ -65,7 +65,37 @@ async function initDB() {
     )
   `);
 
-  // 寫入預設帳號假資料
+  // ⭐️ 5. 全新補上：課程評價表
+  db.run(`
+    CREATE TABLE IF NOT EXISTS course_reviews (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      course_name TEXT NOT NULL,
+      teacher     TEXT NOT NULL,
+      dept        TEXT NOT NULL,
+      semester    TEXT NOT NULL,
+      rating      INTEGER NOT NULL,
+      difficulty  INTEGER NOT NULL,
+      content     TEXT NOT NULL,
+      author      TEXT NOT NULL,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    )
+  `);
+
+  // ⭐️ 6. 全新補上：討論板文章表
+  db.run(`
+    CREATE TABLE IF NOT EXISTS posts (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      category   TEXT NOT NULL,
+      title      TEXT NOT NULL,
+      content    TEXT NOT NULL,
+      author     TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    )
+  `);
+
+  // --- 寫入假資料邏輯 ---
+
+  // 預設帳號假資料
   const userCnt = db.exec('SELECT COUNT(*) FROM users')[0]?.values[0][0] ?? 0;
   if (userCnt === 0) {
     const defaultUsers = [
@@ -79,7 +109,7 @@ async function initDB() {
     console.log('✅ 系統預設登入帳號初始化完成');
   }
 
-  // 寫入逢甲官方轉學任務假資料
+  // 逢甲官方轉學任務假資料
   const chkCnt = db.exec('SELECT COUNT(*) FROM checklists')[0]?.values[0][0] ?? 0;
   if (chkCnt === 0) {
     const checklistData = [
@@ -108,61 +138,20 @@ async function initDB() {
     console.log('✅ checklists 真實數據初始化完成');
   }
 
-  // 課程評價：模擬系上學長姐的真實吐槽
-  const reviewCnt = db.exec('SELECT COUNT(*) AS c FROM course_reviews')[0]?.values[0][0] ?? 0;
-  if (reviewCnt === 0) {
-    const reviews = [
-      ['微積分（一）', '陳志明', '理工學院', '113上', 5, 4, '老師人很好，只要每週小考有去考，期末調分非常大方！建議坐前面一點比較聽得清楚。', '資工系大二學長'],
-      ['程式設計實務', '林雅惠', '資訊電機學院', '113下', 4, 2, '零基礎友善，作業用 Python 寫，只要不抄襲基本上都會過，期末報告可以分組很輕鬆。', '資管系大一新生'],
-      ['資料結構', '王建國', '資訊電機學院', '113上', 2, 5, '內容紮實但老師講話語速極快，期中考難度地獄級，班平均不到 50 分，請謹慎選課。', '資工系大三'],
-      ['行銷管理', '劉世偉', '商學院', '113上', 5, 1, '這門課根本是度假！老師有很多業界經驗分享，期末做個 PPT 分組報告就 A+ 了，推爆！', '行銷系大三'],
-      ['作業系統', '陳建宏', '資訊電機學院', '112下', 3, 5, '課程很深很有含金量，但作業量超級多，每兩週一個程式作業，沒底子的話真的會寫到哭。', '資工系大四']
-    ];
-    reviews.forEach(([cn, t, d, s, r, diff, c, a]) => {
-      db.run(`INSERT INTO course_reviews (course_name, teacher, dept, semester, rating, difficulty, content, author, created_at) VALUES (?,?,?,?,?,?,?,?,datetime('now'))`, 
-      [cn, t, d, s, r, diff, c, a]);
-    });
-  }
-
-  // 討論板：模擬學生真實的八卦與求救現場
-  const postCnt = db.exec('SELECT COUNT(*) AS c FROM posts')[0]?.values[0][0] ?? 0;
-  if (postCnt === 0) {
-    const posts = [
-      ['轉學資訊', '轉學進來逢甲，學分抵免心得分享', '我從淡江轉過來，課綱對照表是關鍵，建議大家把相似課程放在一起列印，老師審核會變很快。', '資工轉學生'],
-      ['課業求救', '工程數學期中考倒一片，大家還活著嗎？', '工數那張考卷是認真的嗎？有沒有人要一起在圖書館組讀書會補救一下...有人可以帶嗎？', '電機系小明'],
-      ['生活資訊', '逢甲夜市租屋心得，文華路真的很吵嗎？', '住了兩個月感想：文華路雖然方便但真的吵死，建議找巷子裡面的，或者往福星路方向找會安靜很多。', '資管系學姐'],
-      ['一般閒聊', '大家這週五晚上都在幹嘛？', '期末將至，除了圖書館還有哪裡適合讀書嗎？學校圖書館位子真的太難搶了QQ', '新鮮人']
-    ];
-    posts.forEach(([cat, title, content, author]) => {
-      db.run(`INSERT INTO posts (category, title, content, author, created_at) VALUES (?,?,?,?,datetime('now'))`,
-      [cat, title, content, author]);
-    });
-  }
-
- // 檢查 credit_records 表格中是否有資料
+  // 檢查 credit_records 表格中是否有資料
   const creditCount = db.exec('SELECT COUNT(*) AS cnt FROM credit_records');
   const cnt2 = creditCount[0]?.values[0][0] ?? 0;
 
   if (cnt2 === 0) {
-    // 滿血破譯還原：8 筆學長姐真實抵免經驗數據
-    // 滿血純本土化：8 筆極度符合台灣私立大學轉學考圈生態的真實數據
     const creditData = [
-      ['東海大學', '資訊工程學系', '物件導向程式設計', 3, '程式設計（二）', '通過',
-       '同在臺中鄰居審核超快！帶東海的課綱去資電館1樓，系助看一眼授課時數剛好18週滿就蓋章了。'],
-      ['靜宜大學', '資料科學暨大數據分析學系', '大數據與資料視覺化', 3, '商學資料分析', '通過',
-       '靜宜轉商學算平轉，課綱裡的 Python 實作時數足夠，主任問了一下期末專題做什麼就給過了。'],
-      ['淡江大學', '航空太空工程學系', '工程數學（一）', 3, '工程數學（上）', '需補課綱',
-       '淡江工數用原文書，但逢甲電機系審核要求看「每週教學進度表」確認有沒有教拉氏轉換(Laplace)，記得補印。'],
-      ['亞洲大學', '休閒與遊憩管理學系', '消費者行為學', 3, '行銷管理概論', '需補課綱',
-       '偏門科系名稱差太多被刁難！後來補交原校授課教授簽名的「章節涵蓋對照表」證明內容80%重疊才准抵。'],
-      ['大葉大學', '消防安全學士學位學程', '工業安全與衛生', 3, '工廠安全管理', '通過',
-       '大葉這科的課綱寫得意外紮實，工管系主任看得很滿意，還鼓勵說「轉來逢甲要好好念」爽快簽名。'],
-      ['朝陽科技大學', '資訊管理系', '資料庫系統實務', 3, '資料庫管理系統', '駁回',
-       '⚠️ 科大轉普大警訊：朝陽這門課實作佔70%，但逢甲資管審核嚴格要求「正規化(Normalization)理論」證明，因偏重實務遭駁回。'],
-      ['中國文化大學', '史學系', '西洋通史（上）', 2, '歷史與文化通識', '通過',
-       '拿去通識教育中心抵免「人文向度通識」。行政老師人超好，確認是歷史本科系開的必修，二話不說直接給過。'],
-      ['國立勤益科技大學', '冷凍空調與能源系', '熱力學', 3, '熱力學（一）', '通過',
-       '勤益科大專業底子硬，大綱附上期中考卷證明計算題難度夠，機電系主任看得很仔細，聊了兩句直接蓋章。'],
+      ['東海大學', '資訊工程學系', '物件導向程式設計', 3, '程式設計（二）', '通過', '同在臺中鄰居審核超快！帶東海的課綱去資電館1樓，系助看一眼授課時數剛好18週滿就蓋章了。'],
+      ['靜宜大學', '資料科學暨大數據分析學系', '大數據與資料視覺化', 3, '商學資料分析', '通過', '靜宜轉商學算平轉，課綱裡的 Python 實作時數足夠，主任問了一下期末專題做什麼就給過了。'],
+      ['淡江大學', '航空太空工程學系', '工程數學（一）', 3, '工程數學（上）', '需補課綱', '淡江工數用原文書，但逢甲電機系審核要求看「每週教學進度表」確認有沒有教拉氏轉換(Laplace)，記得補印。'],
+      ['亞洲大學', '休閒與遊憩管理學系', '消費者行為學', 3, '行銷管理概論', '需補課綱', '偏門科系名稱差太多被刁難！後來補交原校授課教授簽名的「章節涵蓋對照表」證明內容80%重疊才准抵。'],
+      ['大葉大學', '消防安全學士學位學程', '工業安全與衛生', 3, '工廠安全管理', '通過', '大葉這科的課綱寫得意外紮實，工管系主任看得很滿意，還鼓勵說「轉來逢甲要好好念」爽快簽名。'],
+      ['朝陽科技大學', '資訊管理系', '資料庫系統實務', 3, '資料庫管理系統', '駁回', '⚠️ 科大轉普大警訊：朝陽這門課實作佔70%，但逢甲資管審核嚴格要求「正規化(Normalization)理論」證明，因偏重實務遭駁回。'],
+      ['中國文化大學', '史學系', '西洋通史（上）', 2, '歷史與文化通識', '通過', '拿去通識教育中心抵免「人文向度通識」。行政老師人超好，確認是歷史本科系開的必修，二話不說直接給過。'],
+      ['國立勤益科技大學', '冷凍空調與能源系', '熱力學', 3, '熱力學（一）', '通過', '勤益科大專業底子硬，大綱附上期中考卷證明計算題難度夠，機電系主任看得很仔細，聊了兩句直接蓋章。'],
     ];
 
     creditData.forEach(row => {
@@ -174,6 +163,39 @@ async function initDB() {
       );
     });
     console.log('✅ credit_records 真實經驗數據初始化完成');
+  }
+
+  // ⭐️ 課程評價：模擬系上學長姐的真實吐槽
+  const reviewCnt = db.exec('SELECT COUNT(*) AS c FROM course_reviews')[0]?.values[0][0] ?? 0;
+  if (reviewCnt === 0) {
+    const reviews = [
+      ['微積分（一）', '陳志明', '理工學院', '113上', 5, 4, '老師人很好，只要每週小考有去考，期末調分非常大方！建議坐前面一點比較聽得清楚。', '資工系大二學長'],
+      ['程式設計實務', '林雅惠', '資訊電機學院', '113下', 4, 2, '零基礎友善，作業用 Python 寫，只要不抄襲基本上都會過，期末報告可以分組很輕鬆。', '資管系大一新生'],
+      ['資料結構', '王建國', '資訊電機學院', '113上', 2, 5, '內容紮實但老師講話語速極快，期中考難度地獄級，班平均不到 50 分，請謹慎選課。', '資工系大三'],
+      ['行銷管理', '劉世偉', '商學院', '113上', 5, 1, '這門課根本是度假！老師有很多業界經驗分享，期末做個 PPT 分組報告就 A+ 了，推爆！', '行銷系大三'],
+      ['作業系統', '陳建宏', '資訊電機學院', '112下', 3, 5, '課程很深很有含金量，但作業量超級多，每兩週一個程式作業，沒底子的話真的會寫到哭。', '資工系大四']
+    ];
+    reviews.forEach(([cn, t, d, s, r, diff, c, a]) => {
+      db.run(`INSERT INTO course_reviews (course_name, teacher, dept, semester, rating, difficulty, content, author) VALUES (?,?,?,?,?,?,?,?)`, 
+      [cn, t, d, s, r, diff, c, a]);
+    });
+    console.log('✅ course_reviews 課程評價數據初始化完成');
+  }
+
+  // ⭐️ 討論板：模擬學生真實的八卦與求救現場
+  const postCnt = db.exec('SELECT COUNT(*) AS c FROM posts')[0]?.values[0][0] ?? 0;
+  if (postCnt === 0) {
+    const posts = [
+      ['轉學資訊', '轉學進來逢甲，學分抵免心得分享', '我從淡江轉過來，課綱對照表是關鍵，建議大家把相似課程放在一起列印，老師審核會變很快。', '資工轉學生'],
+      ['課業求救', '工程數學期中考倒一片，大家還活著嗎？', '工數那張考卷是認真的嗎？有沒有人要一起在圖書館組讀書會補救一下...有人可以帶嗎？', '電機系小明'],
+      ['生活資訊', '逢甲夜市租屋心得，文華路真的很吵嗎？', '住了兩個月感想：文華路雖然方便但真的吵死，建議找巷子裡面的，或者往福星路方向找會安靜很多。', '資管系學姐'],
+      ['一般閒聊', '大家這週五晚上都在幹嘛？', '期末將至，除了圖書館還有哪裡適合讀書嗎？學校圖書館位子真的太難搶了QQ', '新鮮人']
+    ];
+    posts.forEach(([cat, title, content, author]) => {
+      db.run(`INSERT INTO posts (category, title, content, author) VALUES (?,?,?,?)`,
+      [cat, title, content, author]);
+    });
+    console.log('✅ posts 討論板數據初始化完成');
   }
 
   saveDB();
