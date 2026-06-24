@@ -14,86 +14,82 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ─── POST /api/register (轉學生註冊新帳號) ─────────────────────────────────
+// ⭐ 萬用 SQL 執行器：自動將欄位與數值封裝成物件，完全免疫欄位順序錯亂！
+function execObjects(db, sql) {
+  try {
+    const res = db.exec(sql);
+    if (!res[0]) return [];
+    const cols = res[0].columns;
+    return res[0].values.map(row => {
+      const obj = {};
+      cols.forEach((col, idx) => { obj[col] = row[idx]; });
+      return obj;
+    });
+  } catch (err) {
+    console.error(`SQL Error: ${err.message}`, sql);
+    return [];
+  }
+}
+
+// ─── POST /api/register (註冊) ───────────────────────────────────────────
 app.post('/api/register', (req, res) => {
   const { username, password, name, grade } = req.body;
-  if (!username || !password || !name) {
-    return res.status(400).json({ error: '請填寫完整註冊資訊' });
-  }
+  if (!username || !password || !name) return res.status(400).json({ error: '請填寫完整註冊資訊' });
 
   try {
     const db = getDB();
     const cleanUser = username.trim();
-    const check = db.exec(`SELECT 1 FROM users WHERE username = '${cleanUser}'`);
-    if (check[0]) {
-      return res.status(409).json({ error: '此學號已被註冊過囉，請點選上方切換到「現有帳號登入」！' });
-    }
+    const exist = execObjects(db, `SELECT * FROM users WHERE username = '${cleanUser}'`);
+    if (exist.length > 0) return res.status(409).json({ error: '此學號已被註冊過囉，請點選上方切換到「現有帳號登入」！' });
 
-    const targetGrade = parseInt(grade, 10) || 2;
-    db.run(
-      `INSERT INTO users (username, password, name, role, grade) VALUES (?, ?, ?, 'student', ?)`,
-      [cleanUser, password.trim(), name.trim(), targetGrade]
+    db.run(`INSERT INTO users (username, password, name, role, grade) VALUES (?, ?, ?, 'student', ?)`,
+      [cleanUser, password.trim(), name.trim(), parseInt(grade, 10) || 2]
     );
     saveDB();
-
-    const result = db.exec(`SELECT id, username, name, role, grade FROM users WHERE username = '${cleanUser}'`);
-    const vals = result[0].values[0];
-    const newUser = { id: vals[0], username: vals[1], name: vals[2], role: vals[3], grade: vals[4] };
-    
+    const newUser = execObjects(db, `SELECT * FROM users WHERE username = '${cleanUser}'`)[0];
     res.status(201).json({ message: '註冊成功！已為您自動登入。', user: newUser });
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── POST /api/login (驗證登入帳號密碼) ───────────────────────────────────
+// ─── POST /api/login (登入) ──────────────────────────────────────────────
 app.post('/api/login', (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ error: '請填寫學號與密碼' });
 
   try {
     const db = getDB();
-    const cleanUser = username.trim();
-    const cleanPass = password.trim();
-    const result = db.exec(`SELECT id, username, name, role, grade FROM users WHERE username = '${cleanUser}' AND password = '${cleanPass}'`);
-    if (!result[0]) {
-      return res.status(401).json({ error: '學號或密碼輸入錯誤，請重新確認！' });
-    }
-    const vals = result[0].values[0];
-    const user = { id: vals[0], username: vals[1], name: vals[2], role: vals[3], grade: vals[4] };
-    res.json({ message: '登入成功', user });
+    const users = execObjects(db, `SELECT * FROM users WHERE username = '${username.trim()}' AND password = '${password.trim()}'`);
+    if (users.length === 0) return res.status(401).json({ error: '學號或密碼輸入錯誤，請重新確認！' });
+    res.json({ message: '登入成功', user: users[0] });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── GET /api/checklist (撈取清單與進度) ───────────────────────────────────
+// ─── GET /api/checklist (檢核表與打勾進度) ─────────────────────────────────
 app.get('/api/checklist', (req, res) => {
   const grade = parseInt(req.query.grade, 10);
   const userId = parseInt(req.query.userId, 10);
-
   if (grade !== 2 && grade !== 3) return res.status(400).json({ error: 'grade 必須為 2 或 3' });
 
   try {
     const db = getDB();
     const cleanUserId = isNaN(userId) ? 0 : userId;
-    let sql = `
-      SELECT c.id, c.target_grade, c.category, c.text, c.is_required, c.deadline, c.building, c.office_phone,
-             COALESCE(up.is_completed, 0) AS is_completed
+    const sql = `
+      SELECT c.*, COALESCE(up.is_completed, 0) AS is_completed
       FROM checklists c
       LEFT JOIN user_progress up ON c.id = up.task_id AND up.user_id = ${cleanUserId}
       WHERE c.target_grade = ${grade}
       ORDER BY c.is_required DESC, c.deadline ASC, c.id ASC
     `;
-    const result = db.exec(sql);
-    const rows = result[0] ? result[0].values.map(v => ({
-      id: v[0], target_grade: v[1], category: v[2], text: v[3], is_required: v[4] === 1,
-      deadline: v[5], building: v[6], office_phone: v[7], is_completed: v[8] === 1
-    })) : [];
-
-    res.json({ grade, total: rows.length, items: rows });
+    const items = execObjects(db, sql).map(item => ({
+      ...item,
+      is_required: item.is_required === 1 || item.is_required === true || item.is_required === '1',
+      is_completed: item.is_completed === 1 || item.is_completed === true || item.is_completed === '1'
+    }));
+    res.json({ grade, total: items.length, items });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── POST /api/checklist/progress (絕對寫入版進度儲存) ─────────────────────
+// ─── POST /api/checklist/progress (進度保存) ─────────────────────────────
 app.post('/api/checklist/progress', (req, res) => {
   const { user_id, task_id, is_completed } = req.body;
   if (!user_id || !task_id) return res.status(400).json({ error: '缺少參數' });
@@ -104,8 +100,8 @@ app.post('/api/checklist/progress', (req, res) => {
     const tid = parseInt(task_id, 10);
     const status = is_completed ? 1 : 0;
 
-    const exist = db.exec(`SELECT 1 FROM user_progress WHERE user_id = ${uid} AND task_id = ${tid}`);
-    if (exist[0]) {
+    const exist = execObjects(db, `SELECT * FROM user_progress WHERE user_id = ${uid} AND task_id = ${tid}`);
+    if (exist.length > 0) {
       db.run(`UPDATE user_progress SET is_completed = ${status} WHERE user_id = ${uid} AND task_id = ${tid}`);
     } else {
       db.run(`INSERT INTO user_progress (user_id, task_id, is_completed) VALUES (${uid}, ${tid}, ${status})`);
@@ -115,7 +111,7 @@ app.post('/api/checklist/progress', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── POST /api/checklist (管理員發布任務) ────────────────────────────────────
+// ─── POST /api/checklist (管理員發布任務) ──────────────────────────────────
 app.post('/api/checklist', (req, res) => {
   const { target_grade, category, text, is_required, deadline, building, office_phone } = req.body;
   if (!target_grade || !category || !text || !deadline || !building) return res.status(400).json({ error: '請填寫完整資訊' });
@@ -131,7 +127,7 @@ app.post('/api/checklist', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── DELETE /api/checklist/:id (管理員刪除任務) ──────────────────────────────
+// ─── DELETE /api/checklist/:id (管理員刪除任務) ────────────────────────────
 app.delete('/api/checklist/:id', (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: 'ID 錯誤' });
@@ -150,16 +146,13 @@ app.get('/api/credits', (req, res) => {
   const q = req.query.q ? req.query.q.trim() : '';
   const status = req.query.status && req.query.status !== 'all' ? req.query.status : '';
   try {
-    const db = getDB(); let sql = 'SELECT * FROM credit_records WHERE 1=1'; const params = [];
-    if (status) { sql += ' AND status = ?'; params.push(status); }
-    if (q) {
-      sql += ' AND (original_school LIKE ? OR original_dept LIKE ? OR original_course LIKE ? OR target_course LIKE ?)';
-      const like = `%${q}%`; params.push(like, like, like, like);
-    }
+    const db = getDB();
+    let sql = 'SELECT * FROM credit_records WHERE 1=1';
+    if (status) sql += ` AND status = '${status}'`;
+    if (q) sql += ` AND (original_school LIKE '%${q}%' OR original_dept LIKE '%${q}%' OR original_course LIKE '%${q}%' OR target_course LIKE '%${q}%')`;
     sql += ' ORDER BY created_at DESC';
-    const stmt = db.prepare(sql); const rows = []; stmt.bind(params);
-    while (stmt.step()) rows.push(stmt.getAsObject());
-    stmt.free(); res.json({ total: rows.length, records: rows });
+    const records = execObjects(db, sql);
+    res.json({ total: records.length, records });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -173,57 +166,106 @@ app.post('/api/credits', (req, res) => {
       [original_school.trim(), original_dept.trim(), original_course.trim(), parseInt(credits,10), target_course.trim(), status, advice ? advice.trim() : null, now]
     );
     saveDB();
-    const r = db.exec('SELECT * FROM credit_records ORDER BY id DESC LIMIT 1');
-    const cols = r[0].columns; const vals = r[0].values[0]; const rec = {};
-    cols.forEach((c, i) => { rec[c] = vals[i]; });
-    res.status(201).json({ message: '新增成功', record: rec });
+    const record = execObjects(db, 'SELECT * FROM credit_records ORDER BY id DESC LIMIT 1')[0];
+    res.status(201).json({ message: '新增成功', record });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── 課程評價 API ──────────────────────────────────────────────────────────
 app.get('/api/reviews', (req, res) => {
-  const q = req.query.q ? req.query.q.trim() : ''; const dept = req.query.dept && req.query.dept !== 'all' ? req.query.dept : '';
+  const q = req.query.q ? req.query.q.trim() : '';
+  const dept = req.query.dept && req.query.dept !== 'all' && req.query.dept !== '全部學院' ? req.query.dept : '';
   try {
-    const db = getDB(); let sql = 'SELECT * FROM course_reviews WHERE 1=1'; const params = [];
-    if (q) { sql += ' AND (course_name LIKE ? OR teacher LIKE ?)'; params.push(`%${q}%`, `%${q}%`); }
-    if (dept) { sql += ' AND dept = ?'; params.push(dept); }
+    const db = getDB();
+    let sql = 'SELECT * FROM course_reviews WHERE 1=1';
+    if (dept) sql += ` AND dept = '${dept}'`;
+    if (q) sql += ` AND (course_name LIKE '%${q}%' OR teacher LIKE '%${q}%')`;
     sql += ' ORDER BY created_at DESC';
-    const stmt = db.prepare(sql); const rows = []; stmt.bind(params);
-    while (stmt.step()) rows.push(stmt.getAsObject());
-    stmt.free(); res.json({ total: rows.length, reviews: rows });
+    const reviews = execObjects(db, sql);
+    res.json({ total: reviews.length, reviews });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/reviews', (req, res) => {
   const { course_name, teacher, dept, semester, rating, difficulty, content, author } = req.body;
-  if (!course_name || !teacher || !dept || !semester || !rating || !difficulty || !content) return res.status(400).json({ error: '缺少必填欄位' });
+  if (!course_name || !teacher || !content) return res.status(400).json({ error: '缺少必填欄位' });
   try {
     const db = getDB(); const now = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Taipei' }).replace('T', ' ');
     db.run(
       `INSERT INTO course_reviews (course_name, teacher, dept, semester, rating, difficulty, content, author, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [course_name.trim(), teacher.trim(), dept.trim(), semester.trim(), parseInt(rating,10), parseInt(difficulty,10), content.trim(), author?.trim() || '匿名學生', now]
+      [course_name.trim(), teacher.trim(), dept || '資訊電機學院', semester || '113上', parseInt(rating,10)||5, parseInt(difficulty,10)||3, content.trim(), author?.trim() || '匿名學生', now]
     );
-    saveDB(); res.status(201).json({ message: '評價成功' });
+    saveDB();
+    const review = execObjects(db, 'SELECT * FROM course_reviews ORDER BY id DESC LIMIT 1')[0];
+    res.status(201).json({ message: '評價成功', review });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// ─── 討論板 API ────────────────────────────────────────────────────────────
+// ⭐ 討論板與留言互動 API ───────────────────────────────────────────────────
 app.get('/api/posts', (req, res) => {
-  const cat = req.query.category && req.query.category !== 'all' ? req.query.category : '';
+  const cat = req.query.category && req.query.category !== 'all' && req.query.category !== '全部' ? req.query.category : '';
   try {
-    const db = getDB(); let sql = 'SELECT * FROM posts WHERE 1=1';
-    if (cat) sql += ` AND category = '${cat}'`; sql += ' ORDER BY created_at DESC';
-    const r = db.exec(sql);
-    res.json({ posts: r[0] ? r[0].values.map(v=>({id:v[0],category:v[1],title:v[2],content:v[3],author:v[4],likes:v[5],created_at:v[6]})) : [] });
+    const db = getDB();
+    let sql = `
+      SELECT p.*, COUNT(c.id) AS comments_count
+      FROM posts p
+      LEFT JOIN comments c ON p.id = c.post_id
+      WHERE 1=1
+    `;
+    if (cat) sql += ` AND p.category = '${cat}'`;
+    sql += ` GROUP BY p.id ORDER BY p.created_at DESC`;
+    const posts = execObjects(db, sql);
+    res.json({ total: posts.length, posts });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/posts', (req, res) => {
   const { category, title, content, author } = req.body;
+  if (!title || !content) return res.status(400).json({ error: '缺少標題或內容' });
   try {
     const db = getDB(); const now = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Taipei' }).replace('T', ' ');
-    db.run('INSERT INTO posts (category,title,content,author,created_at) VALUES (?,?,?,?,?)', [category||'一般', title, content, author||'匿名學生', now]);
-    saveDB(); res.status(201).json({ message: '發文成功' });
+    db.run(`INSERT INTO posts (category, title, content, author, likes, created_at) VALUES (?,?,?,?,0,?)`,
+      [category || '一般閒聊', title.trim(), content.trim(), author?.trim() || '匿名島民', now]
+    );
+    saveDB();
+    const post = execObjects(db, `SELECT p.*, 0 AS comments_count FROM posts p ORDER BY id DESC LIMIT 1`)[0];
+    res.status(201).json({ message: '發文成功', post });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ⭐ 取得單篇文章的留言清單
+app.get('/api/posts/:id/comments', (req, res) => {
+  const postId = parseInt(req.params.id, 10);
+  try {
+    const db = getDB();
+    const comments = execObjects(db, `SELECT * FROM comments WHERE post_id = ${postId} ORDER BY id ASC`);
+    res.json({ comments });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ⭐ 新增留言到單篇文章
+app.post('/api/posts/:id/comments', (req, res) => {
+  const postId = parseInt(req.params.id, 10);
+  const { content, author } = req.body;
+  if (!content) return res.status(400).json({ error: '留言內容不能為空' });
+  try {
+    const db = getDB(); const now = new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Taipei' }).replace('T', ' ');
+    db.run(`INSERT INTO comments (post_id, content, author, created_at) VALUES (?,?,?,?)`,
+      [postId, content.trim(), author?.trim() || '匿名島民', now]
+    );
+    saveDB();
+    res.status(201).json({ message: '留言成功' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ⭐ 點讚單篇文章
+app.post('/api/posts/:id/like', (req, res) => {
+  const postId = parseInt(req.params.id, 10);
+  try {
+    const db = getDB();
+    db.run(`UPDATE posts SET likes = likes + 1 WHERE id = ${postId}`);
+    saveDB();
+    res.json({ message: '已按讚' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -231,5 +273,5 @@ app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 app.get('*', (req, res) => { if (!req.path.startsWith('/api')) res.sendFile(path.join(__dirname, 'public', 'index.html')); });
 
 initDB().then(() => {
-  app.listen(port, '0.0.0.0', () => console.log(`🚀 旗艦版 API 啟動於 port ${port}`));
+  app.listen(port, '0.0.0.0', () => console.log(`🚀 終極完全體 API 啟動於 port ${port}`));
 }).catch(err => console.error(err));

@@ -92,6 +92,29 @@ async function initDB() {
       created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
     )
   `);
+  // ⭐ 6. 討論板文章表 (補上 likes 欄位)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS posts (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      category   TEXT NOT NULL,
+      title      TEXT NOT NULL,
+      content    TEXT NOT NULL,
+      author     TEXT NOT NULL,
+      likes      INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    )
+  `);
+
+  // ⭐ 7. 全新補上：留言回應表 (永久儲存交流板的每一則留言)
+  db.run(`
+    CREATE TABLE IF NOT EXISTS comments (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      post_id    INTEGER NOT NULL,
+      content    TEXT NOT NULL,
+      author     TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    )
+  `);
 
   // --- 寫入假資料邏輯 ---
 
